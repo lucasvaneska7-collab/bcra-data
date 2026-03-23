@@ -37,7 +37,13 @@ def fetch_variable_catalog():
         resp = requests.get(url, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
-        results = data.get("results", [])
+        # BCRA API may return data under different keys depending on version
+        if isinstance(data, list):
+            results = data
+        else:
+            results = data.get("results") or data.get("variables") or []
+            if not results:
+                logger.info(f"Catalog response keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
         if not results:
             break
         all_vars.extend(results)
@@ -76,7 +82,15 @@ def fetch_series(id_variable, desde, hasta):
         resp = requests.get(url, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
-        results = data.get("results", [])
+        if isinstance(data, list):
+            results = data
+        else:
+            results = data.get("results") or data.get("data") or data.get("variables") or []
+            if not results and offset == 0:
+                logger.info(f"Series response keys for id={id_variable}: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+                if isinstance(data, dict) and len(data) == 1:
+                    # Try the single key whatever it's called
+                    results = list(data.values())[0] if isinstance(list(data.values())[0], list) else []
         if not results:
             break
         all_data.extend(results)
@@ -88,10 +102,13 @@ def fetch_series(id_variable, desde, hasta):
 
 def parse_series(raw_data):
     """Parse raw BCRA series data into sorted list of (date_str, value) tuples."""
+    if raw_data:
+        logger.info(f"Parsing {len(raw_data)} data points. Sample: {raw_data[0]}")
     parsed = []
     for item in raw_data:
-        fecha = item.get("fecha", "")
-        valor = item.get("valor")
+        # Handle both field name conventions: fecha/valor and d/v
+        fecha = item.get("fecha") or item.get("d", "")
+        valor = item.get("valor") if item.get("valor") is not None else item.get("v")
         if valor is None:
             continue
         # BCRA returns dates as "DD/MM/YYYY" or "YYYY-MM-DD"
