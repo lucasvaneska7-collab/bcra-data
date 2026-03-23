@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Monetario Argentina</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            border-bottom: 1px solid #333;
+        }
+        .header h1 {
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .timestamp {
+            color: #888;
+            font-size: 13px;
+        }
+        #refreshBtn {
+            background: #1a73e8;
+            color: #fff;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #refreshBtn:hover { background: #1557b0; }
+        #refreshBtn:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            padding: 16px 24px;
+        }
+        .chart-container {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 12px;
+            min-height: 420px;
+        }
+        .chart-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 400px;
+            color: #555;
+            font-size: 15px;
+        }
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .loading-overlay.active { display: flex; }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid #333;
+            border-top-color: #1a73e8;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { color: #aaa; font-size: 14px; }
+        .error-banner {
+            display: none;
+            background: #3a1c1c;
+            border: 1px solid #5a2020;
+            color: #ff8080;
+            padding: 12px 24px;
+            margin: 8px 24px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .warning-banner {
+            display: none;
+            background: #3a3a1c;
+            border: 1px solid #5a5a20;
+            color: #ffff80;
+            padding: 12px 24px;
+            margin: 8px 24px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Dashboard Monetario Argentina</h1>
+    <div class="header-right">
+        <span class="timestamp" id="lastUpdate">Sin datos cargados</span>
+        <button id="refreshBtn" onclick="refreshData()">Actualizar Datos</button>
+    </div>
+</div>
+
+<div class="error-banner" id="errorBanner"></div>
+<div class="warning-banner" id="warningBanner"></div>
+
+<div class="grid">
+    <div class="chart-container" id="chart1-container">
+        <div class="chart-placeholder">Crecimiento del Crédito (SPriv+SPub) — Presione "Actualizar Datos"</div>
+    </div>
+    <div class="chart-container" id="chart2-container">
+        <div class="chart-placeholder">Crédito al Consumo — Presione "Actualizar Datos"</div>
+    </div>
+    <div class="chart-container" id="chart3-container">
+        <div class="chart-placeholder">Préstamos en USD — Presione "Actualizar Datos"</div>
+    </div>
+    <div class="chart-container" id="chart4-container">
+        <div class="chart-placeholder">Composición de Balances - Activo — Presione "Actualizar Datos"</div>
+    </div>
+</div>
+
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Descargando datos del BCRA...</div>
+</div>
+
+<script>
+// Common Plotly layout settings
+const DARK_LAYOUT = {
+    paper_bgcolor: '#111',
+    plot_bgcolor: '#111',
+    font: { color: '#fff', size: 11 },
+    margin: { t: 40, b: 60, l: 70, r: 70 },
+    legend: {
+        bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#ccc', size: 10 },
+        orientation: 'h',
+        y: -0.25,
+        x: 0.5,
+        xanchor: 'center'
+    },
+    xaxis: {
+        color: '#fff',
+        gridcolor: '#2a2a2a',
+        linecolor: '#555',
+        tickfont: { color: '#aaa' },
+        rangeselector: {
+            buttons: [
+                { count: 1, label: '1A', step: 'year', stepmode: 'backward' },
+                { count: 2, label: '2A', step: 'year', stepmode: 'backward' },
+                { count: 3, label: '3A', step: 'year', stepmode: 'backward' },
+                { count: 5, label: '5A', step: 'year', stepmode: 'backward' },
+                { step: 'all', label: 'Todo' }
+            ],
+            bgcolor: '#222',
+            activecolor: '#1a73e8',
+            font: { color: '#fff', size: 10 },
+            bordercolor: '#444',
+        },
+        rangeslider: { visible: true, bgcolor: '#111', bordercolor: '#333', thickness: 0.06 },
+    },
+    hovermode: 'x unified',
+};
+
+const COLORS = {
+    blue: '#4285f4',
+    orange: '#ff9800',
+    green: '#34a853',
+    red: '#ea4335',
+    purple: '#ab47bc',
+    cyan: '#00bcd4',
+    yellow: '#fdd835',
+    teal: '#009688',
+};
+
+function makeYAxis(label, side, overlaying) {
+    const axis = {
+        title: { text: label, font: { color: '#fff', size: 12 } },
+        color: '#fff',
+        gridcolor: '#2a2a2a',
+        linecolor: '#555',
+        tickfont: { color: '#aaa' },
+        zeroline: false,
+    };
+    if (side === 'right') {
+        axis.side = 'right';
+        axis.overlaying = overlaying || 'y';
+        axis.showgrid = false;
+    }
+    return axis;
+}
+
+function refreshData() {
+    const btn = document.getElementById('refreshBtn');
+    const overlay = document.getElementById('loadingOverlay');
+    const errorBanner = document.getElementById('errorBanner');
+    const warningBanner = document.getElementById('warningBanner');
+
+    btn.disabled = true;
+    btn.textContent = 'Cargando...';
+    overlay.classList.add('active');
+    errorBanner.style.display = 'none';
+    warningBanner.style.display = 'none';
+
+    fetch('/api/refresh')
+        .then(resp => {
+            if (!resp.ok) return resp.json().then(d => { throw new Error(d.message || 'Error del servidor'); });
+            return resp.json();
+        })
+        .then(data => {
+            if (data.status === 'error') {
+                throw new Error(data.message);
+            }
+
+            document.getElementById('lastUpdate').textContent =
+                'Última actualización: ' + data.timestamp;
+
+            if (data.missing_variables && data.missing_variables.length > 0) {
+                warningBanner.textContent =
+                    'Variables no encontradas en el catálogo BCRA: ' + data.missing_variables.join(', ') +
+                    '. Algunos gráficos pueden estar incompletos. Visite /api/variables para ver el catálogo completo.';
+                warningBanner.style.display = 'block';
+            }
+
+            renderChart1(data.charts.chart1);
+            renderChart2(data.charts.chart2);
+            renderChart3(data.charts.chart3);
+            renderChart4(data.charts.chart4);
+        })
+        .catch(err => {
+            errorBanner.textContent = 'Error: ' + err.message;
+            errorBanner.style.display = 'block';
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = 'Actualizar Datos';
+            overlay.classList.remove('active');
+        });
+}
+
+function renderChart1(data) {
+    const traces = [];
+
+    if (data.spriv && data.spriv.dates.length) {
+        traces.push({
+            x: data.spriv.dates,
+            y: data.spriv.values,
+            name: 'Sector Privado',
+            type: 'bar',
+            marker: { color: COLORS.blue },
+            yaxis: 'y',
+            hovertemplate: '%{x|%d/%m/%Y}<br>Sector Privado: %{y:,.1f} bn<extra></extra>',
+        });
+    }
+    if (data.spub && data.spub.dates.length) {
+        traces.push({
+            x: data.spub.dates,
+            y: data.spub.values,
+            name: 'Sector Público',
+            type: 'bar',
+            marker: { color: COLORS.orange },
+            yaxis: 'y',
+            hovertemplate: '%{x|%d/%m/%Y}<br>Sector Público: %{y:,.1f} bn<extra></extra>',
+        });
+    }
+    if (data.yoy && data.yoy.dates.length) {
+        traces.push({
+            x: data.yoy.dates,
+            y: data.yoy.values,
+            name: 'YoY %',
+            type: 'scatter',
+            mode: 'lines',
+            line: { color: COLORS.red, width: 2 },
+            yaxis: 'y2',
+            hovertemplate: '%{x|%d/%m/%Y}<br>YoY: %{y:.1f}%<extra></extra>',
+        });
+    }
+
+    const layout = {
+        ...DARK_LAYOUT,
+        title: { text: data.title, font: { color: '#fff', size: 15 } },
+        barmode: 'stack',
+        yaxis: makeYAxis('ARS $bn', 'left'),
+        yaxis2: makeYAxis('% YoY', 'right', 'y'),
+        xaxis: { ...DARK_LAYOUT.xaxis },
+    };
+
+    Plotly.newPlot('chart1-container', traces, layout, { responsive: true, displayModeBar: false });
+}
+
+function renderChart2(data) {
+    const series = [
+        { key: 'hipotecarios', name: 'Hipotecarios', color: COLORS.blue },
+        { key: 'prendarios', name: 'Prendarios', color: COLORS.green },
+        { key: 'personales', name: 'Personales', color: COLORS.orange },
+        { key: 'tarjetas', name: 'Tarjetas de Crédito', color: COLORS.purple },
+    ];
+
+    const traces = [];
+    series.forEach(s => {
+        const d = data[s.key];
+        if (d && d.dates.length) {
+            traces.push({
+                x: d.dates,
+                y: d.values,
+                name: s.name,
+                type: 'bar',
+                marker: { color: s.color },
+                yaxis: 'y',
+                hovertemplate: `%{x|%d/%m/%Y}<br>${s.name}: %{y:,.1f} bn<extra></extra>`,
+            });
+        }
+    });
+
+    if (data.yoy && data.yoy.dates.length) {
+        traces.push({
+            x: data.yoy.dates,
+            y: data.yoy.values,
+            name: 'YoY %',
+            type: 'scatter',
+            mode: 'lines',
+            line: { color: COLORS.red, width: 2 },
+            yaxis: 'y2',
+            hovertemplate: '%{x|%d/%m/%Y}<br>YoY: %{y:.1f}%<extra></extra>',
+        });
+    }
+
+    const layout = {
+        ...DARK_LAYOUT,
+        title: { text: data.title, font: { color: '#fff', size: 15 } },
+        barmode: 'stack',
+        yaxis: makeYAxis('ARS $bn', 'left'),
+        yaxis2: makeYAxis('% YoY', 'right', 'y'),
+        xaxis: { ...DARK_LAYOUT.xaxis },
+    };
+
+    Plotly.newPlot('chart2-container', traces, layout, { responsive: true, displayModeBar: false });
+}
+
+function renderChart3(data) {
+    const traces = [];
+
+    if (data.total_me && data.total_me.dates.length) {
+        traces.push({
+            x: data.total_me.dates,
+            y: data.total_me.values,
+            name: 'Préstamos en USD',
+            type: 'bar',
+            marker: { color: COLORS.cyan },
+            yaxis: 'y',
+            hovertemplate: '%{x|%d/%m/%Y}<br>USD: %{y:,.2f} bn<extra></extra>',
+        });
+    }
+
+    if (data.yoy && data.yoy.dates.length) {
+        traces.push({
+            x: data.yoy.dates,
+            y: data.yoy.values,
+            name: 'YoY %',
+            type: 'scatter',
+            mode: 'lines',
+            line: { color: COLORS.red, width: 2 },
+            yaxis: 'y2',
+            hovertemplate: '%{x|%d/%m/%Y}<br>YoY: %{y:.1f}%<extra></extra>',
+        });
+    }
+
+    const layout = {
+        ...DARK_LAYOUT,
+        title: { text: data.title, font: { color: '#fff', size: 15 } },
+        yaxis: makeYAxis('US$ bn', 'left'),
+        yaxis2: makeYAxis('% YoY', 'right', 'y'),
+        xaxis: { ...DARK_LAYOUT.xaxis },
+    };
+
+    Plotly.newPlot('chart3-container', traces, layout, { responsive: true, displayModeBar: false });
+}
+
+function renderChart4(data) {
+    if (!data.dates || !data.dates.length) {
+        document.getElementById('chart4-container').innerHTML =
+            '<div class="chart-placeholder">Composición de Balances - Sin datos disponibles</div>';
+        return;
+    }
+
+    const series = [
+        { key: 'efectivo', name: 'Efectivo y Depósitos', color: COLORS.blue },
+        { key: 'titulos', name: 'Títulos Valores', color: COLORS.green },
+        { key: 'spub', name: 'Préstamos Sector Público', color: COLORS.orange },
+        { key: 'spriv', name: 'Préstamos Sector Privado', color: COLORS.purple },
+        { key: 'otros', name: 'Otros', color: COLORS.yellow },
+    ];
+
+    const traces = series.map(s => ({
+        x: data.dates,
+        y: data[s.key],
+        name: s.name,
+        type: 'scatter',
+        mode: 'lines',
+        fill: 'tonexty',
+        stackgroup: 'one',
+        groupnorm: 'percent',
+        line: { width: 0.5, color: s.color },
+        fillcolor: s.color + 'cc',
+        hovertemplate: `%{x|%d/%m/%Y}<br>${s.name}: %{y:.1f}%<extra></extra>`,
+    }));
+
+    const layout = {
+        ...DARK_LAYOUT,
+        title: { text: data.title, font: { color: '#fff', size: 15 } },
+        yaxis: {
+            ...makeYAxis('%', 'left'),
+            range: [0, 100],
+            ticksuffix: '%',
+        },
+        xaxis: { ...DARK_LAYOUT.xaxis },
+    };
+
+    Plotly.newPlot('chart4-container', traces, layout, { responsive: true, displayModeBar: false });
+}
+</script>
+
+</body>
+</html>
