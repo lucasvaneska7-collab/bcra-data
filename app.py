@@ -99,7 +99,18 @@ def fetch_series(id_variable, desde, hasta):
         if len(results) < limit:
             break
         offset += limit
-    return all_data
+
+    # BCRA API returns nested structure: [{'idVariable': N, 'detalle': [{fecha, valor}, ...]}]
+    # Unwrap the 'detalle' array to get flat list of data points
+    unwrapped = []
+    for item in all_data:
+        if isinstance(item, dict) and "detalle" in item:
+            unwrapped.extend(item["detalle"])
+        else:
+            unwrapped.append(item)
+    if unwrapped != all_data:
+        logger.info(f"Unwrapped detalle: {len(all_data)} items -> {len(unwrapped)} data points")
+    return unwrapped
 
 
 def parse_series(raw_data):
