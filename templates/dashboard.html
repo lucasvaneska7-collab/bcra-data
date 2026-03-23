@@ -138,7 +138,7 @@
         <div class="chart-placeholder">Crédito al Consumo — Presione "Actualizar Datos"</div>
     </div>
     <div class="chart-container" id="chart3-container">
-        <div class="chart-placeholder">Préstamos en USD — Presione "Actualizar Datos"</div>
+        <div class="chart-placeholder">Préstamos al Sector Privado (Serie B) — Presione "Actualizar Datos"</div>
     </div>
     <div class="chart-container" id="chart4-container">
         <div class="chart-placeholder">Composición de Balances - Activo — Presione "Actualizar Datos"</div>
@@ -370,11 +370,11 @@ function renderChart3(data) {
         traces.push({
             x: data.total_me.dates,
             y: data.total_me.values,
-            name: 'Préstamos en USD',
+            name: 'Préstamos S.Privado (B)',
             type: 'bar',
             marker: { color: COLORS.cyan },
             yaxis: 'y',
-            hovertemplate: '%{x|%d/%m/%Y}<br>USD: %{y:,.2f} bn<extra></extra>',
+            hovertemplate: '%{x|%d/%m/%Y}<br>ARS: %{y:,.2f} bn<extra></extra>',
         });
     }
 
@@ -394,7 +394,7 @@ function renderChart3(data) {
     const layout = {
         ...DARK_LAYOUT,
         title: { text: data.title, font: { color: '#fff', size: 15 } },
-        yaxis: makeYAxis('US$ bn', 'left'),
+        yaxis: makeYAxis('ARS $bn', 'left'),
         yaxis2: makeYAxis('% YoY', 'right', 'y'),
         xaxis: { ...DARK_LAYOUT.xaxis },
     };

@@ -170,127 +170,55 @@ def align_and_sum(series_list):
 
 
 # ---------------------------------------------------------------------------
-# Variable mapping configuration
-# Each entry: key -> (search_keywords, exclude_keywords)
-# We'll try multiple keyword combinations and pick the best match
+# Variable ID mapping — hardcoded from the BCRA catalog
+# The BCRA API descriptions don't distinguish MN/ME, so we use known IDs.
 # ---------------------------------------------------------------------------
-VARIABLE_MAPPINGS = {
-    # Chart 1: Credit growth
-    "prestamos_spriv_mn": {
-        "keywords_options": [
-            (["préstamos", "sector privado", "moneda nacional"], []),
-            (["prestamos", "sector privado", "moneda nacional"], []),
-            (["préstamos", "privado", "pesos"], []),
-        ]
-    },
-    "prestamos_spriv_me": {
-        "keywords_options": [
-            (["préstamos", "sector privado", "moneda extranjera"], []),
-            (["prestamos", "sector privado", "moneda extranjera"], []),
-            (["préstamos", "privado", "extranjera"], []),
-        ]
-    },
-    "prestamos_spub_mn": {
-        "keywords_options": [
-            (["préstamos", "sector público", "moneda nacional"], []),
-            (["prestamos", "sector publico", "moneda nacional"], []),
-            (["préstamos", "público", "pesos"], []),
-            (["prestamos", "publico", "pesos"], []),
-        ]
-    },
-    "prestamos_spub_me": {
-        "keywords_options": [
-            (["préstamos", "sector público", "moneda extranjera"], []),
-            (["prestamos", "sector publico", "moneda extranjera"], []),
-            (["préstamos", "público", "extranjera"], []),
-            (["prestamos", "publico", "extranjera"], []),
-        ]
-    },
-    # Chart 2: Consumer credit
-    "hipotecarios": {
-        "keywords_options": [
-            (["hipotecarios"], ["tasa"]),
-            (["hipotecario"], ["tasa"]),
-        ]
-    },
-    "prendarios": {
-        "keywords_options": [
-            (["prendarios"], ["tasa"]),
-            (["prendario"], ["tasa"]),
-        ]
-    },
-    "personales": {
-        "keywords_options": [
-            (["personales"], ["tasa"]),
-            (["personal"], ["tasa", "hipotec", "prend"]),
-        ]
-    },
-    "tarjetas": {
-        "keywords_options": [
-            (["tarjetas", "crédito"], ["tasa"]),
-            (["tarjetas", "credito"], ["tasa"]),
-            (["tarjeta"], ["tasa"]),
-        ]
-    },
-    # Chart 3: USD loans
-    "prestamos_total_me": {
-        "keywords_options": [
-            (["préstamos", "moneda extranjera"], ["privado", "público", "publico"]),
-            (["prestamos", "moneda extranjera"], ["privado", "publico"]),
-            (["préstamos", "total", "extranjera"], []),
-            (["prestamos", "total", "extranjera"], []),
-        ]
-    },
-    # Chart 4: Balance sheet composition
-    "activo_efectivo": {
-        "keywords_options": [
-            (["efectivo", "cuenta corriente"], []),
-            (["efectivo"], ["pasivo"]),
-            (["disponibilidades"], []),
-        ]
-    },
-    "activo_titulos": {
-        "keywords_options": [
-            (["títulos"], ["pasivo"]),
-            (["titulos"], ["pasivo"]),
-            (["títulos valores"], []),
-            (["titulos valores"], []),
-        ]
-    },
-    "activo_total": {
-        "keywords_options": [
-            (["activo", "total"], []),
-            (["total", "activo"], []),
-        ]
-    },
+VARIABLE_ID_MAP = {
+    # Chart 1: Total credit (private + public sectors)
+    "prestamos_spriv": 26,    # Préstamos de las entidades financieras al sector privado
+    "prestamos_spub": 199,    # Préstamos a los gobiernos (national + provincial + municipal)
+
+    # Chart 2: Consumer credit breakdown
+    "hipotecarios": 112,      # Préstamos hipotecaríos otorgados al sector privado
+    "prendarios": 113,        # Préstamos prendaríos otorgados al sector privado
+    "personales": 114,        # Préstamos personales otorgados al sector privado
+    "tarjetas": 115,          # Préstamos mediante tarjeta de créditos otorgados al sector privado
+
+    # Chart 3: Total private sector loans (alternate series for comparison)
+    "prestamos_spriv_alt": 117,  # Préstamos otorgados al sector privado (alternate)
+
+    # Chart 4: Balance sheet — these variables are NOT available in the
+    # monetarias endpoint. We keep them as None so the chart shows a message.
+    "activo_efectivo": None,
+    "activo_titulos": None,
+    "activo_total": None,
 }
 
 
 def discover_variables(catalog):
-    """Try to match each required variable to its idVariable in the catalog."""
+    """Map required variables using hardcoded IDs from the BCRA catalog."""
     discovered = {}
-    for key, config in VARIABLE_MAPPINGS.items():
-        found = None
-        for keywords, exclude in config["keywords_options"]:
-            matches = find_variable(catalog, keywords, exclude)
-            if len(matches) == 1:
-                found = matches[0]
-                break
-            elif len(matches) > 1:
-                # Pick the first match (usually the most specific)
-                found = matches[0]
-                break
-        if found:
-            discovered[key] = {
-                "idVariable": found["idVariable"],
-                "descripcion": found.get("descripcion", ""),
-                "frecuencia": found.get("frecuencia", ""),
-                "unidad": found.get("unidad", ""),
-            }
-            logger.info(f"Matched '{key}' -> id={found['idVariable']}: {found.get('descripcion', '')}")
-        else:
-            logger.warning(f"Could not match variable: {key}")
+    catalog_by_id = {v.get("idVariable"): v for v in catalog}
+
+    for key, var_id in VARIABLE_ID_MAP.items():
+        if var_id is None:
             discovered[key] = None
+            logger.info(f"Variable '{key}' not available in this API endpoint")
+            continue
+
+        var = catalog_by_id.get(var_id)
+        if var:
+            discovered[key] = {
+                "idVariable": var_id,
+                "descripcion": var.get("descripcion", ""),
+                "frecuencia": var.get("frecuencia", ""),
+                "unidad": var.get("unidad", ""),
+            }
+            logger.info(f"Matched '{key}' -> id={var_id}: {var.get('descripcion', '')}")
+        else:
+            logger.warning(f"Variable ID {var_id} not found in catalog for '{key}'")
+            discovered[key] = None
+
     return discovered
 
 
@@ -314,19 +242,8 @@ def build_chart_data(discovered, desde, hasta):
     # -----------------------------------------------------------------------
     # Chart 1: Crecimiento del Credito (SPriv+SPub)
     # -----------------------------------------------------------------------
-    spriv_mn_d, spriv_mn_v = get_series("prestamos_spriv_mn")
-    spriv_me_d, spriv_me_v = get_series("prestamos_spriv_me")
-    spub_mn_d, spub_mn_v = get_series("prestamos_spub_mn")
-    spub_me_d, spub_me_v = get_series("prestamos_spub_me")
-
-    # Combine MN+ME for each sector
-    spriv_dates, spriv_total = align_and_sum([
-        (spriv_mn_d, spriv_mn_v), (spriv_me_d, spriv_me_v)
-    ]) if spriv_mn_d and spriv_me_d else (spriv_mn_d or spriv_me_d, spriv_mn_v or spriv_me_v)
-
-    spub_dates, spub_total = align_and_sum([
-        (spub_mn_d, spub_mn_v), (spub_me_d, spub_me_v)
-    ]) if spub_mn_d and spub_me_d else (spub_mn_d or spub_me_d, spub_mn_v or spub_me_v)
+    spriv_dates, spriv_total = get_series("prestamos_spriv")
+    spub_dates, spub_total = get_series("prestamos_spub")
 
     # Total for YoY
     total_dates, total_values = align_and_sum([
@@ -364,14 +281,14 @@ def build_chart_data(discovered, desde, hasta):
     }
 
     # -----------------------------------------------------------------------
-    # Chart 3: Prestamos en USD
+    # Chart 3: Prestamos al Sector Privado (serie alternativa)
     # -----------------------------------------------------------------------
-    me_d, me_v = get_series("prestamos_total_me")
-    yoy_dates_3, yoy_values_3 = compute_yoy(me_d, me_v) if me_d else ([], [])
+    alt_d, alt_v = get_series("prestamos_spriv_alt")
+    yoy_dates_3, yoy_values_3 = compute_yoy(alt_d, alt_v) if alt_d else ([], [])
 
     charts["chart3"] = {
-        "title": "Préstamos en USD",
-        "total_me": {"dates": me_d, "values": to_billions(me_v)},
+        "title": "Préstamos al Sector Privado (Serie B)",
+        "total_me": {"dates": alt_d, "values": to_billions(alt_v)},
         "yoy": {"dates": yoy_dates_3, "values": yoy_values_3},
     }
 
@@ -461,8 +378,9 @@ def api_refresh():
         catalog = fetch_variable_catalog()
         discovered = discover_variables(catalog)
 
-        # Check which variables were found
-        missing = [k for k, v in discovered.items() if v is None]
+        # Check which variables were found (exclude intentionally-None entries)
+        intentionally_missing = {k for k, v in VARIABLE_ID_MAP.items() if v is None}
+        missing = [k for k, v in discovered.items() if v is None and k not in intentionally_missing]
         if missing:
             logger.warning(f"Missing variables: {missing}")
 
