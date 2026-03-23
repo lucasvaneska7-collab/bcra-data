@@ -5,6 +5,7 @@ Fetches monetary data from BCRA API and serves an interactive dashboard.
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 
 import requests
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 BCRA_BASE = "https://api.bcra.gob.ar"
 BCRA_MONETARIAS = f"{BCRA_BASE}/estadisticas/v4.0/monetarias"
 REQUEST_TIMEOUT = 30
+SAMPLE_DATA_PATH = os.path.join(os.path.dirname(__file__), "sample_data.json")
 
 # Cache for variable catalog so we don't re-fetch it on every refresh
 _variable_catalog = None
@@ -161,8 +163,8 @@ def compute_yoy(dates, values):
 
 
 def to_billions(values):
-    """Convert values to billions."""
-    return [round(v / 1_000_000, 2) for v in values]
+    """Convert values from miles de pesos to billones (trillions in English)."""
+    return [round(v / 1_000_000_000, 2) for v in values]
 
 
 def align_and_sum(series_list):
@@ -184,6 +186,83 @@ def align_and_sum(series_list):
             valid_dates.append(date)
             totals.append(sum(vals))
     return valid_dates, totals
+
+
+def load_sample_data():
+    """Load sample data from JSON file as fallback when API is unavailable."""
+    try:
+        with open(SAMPLE_DATA_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.error(f"Could not load sample data: {e}")
+        return None
+
+
+def build_chart_data_from_sample(sample):
+    """Build chart data directly from sample_data.json."""
+    charts = {}
+
+    def get_series_from_sample(var_id):
+        key = str(var_id)
+        series_info = sample.get("series", {}).get(key)
+        if not series_info:
+            return [], []
+        raw = series_info.get("data", [])
+        parsed = parse_series(raw)
+        if not parsed:
+            return [], []
+        dates = [p[0] for p in parsed]
+        values = [p[1] for p in parsed]
+        return dates, values
+
+    # Chart 1
+    spriv_dates, spriv_total = get_series_from_sample(26)
+    spub_dates, spub_total = get_series_from_sample(199)
+    total_dates, total_values = align_and_sum([
+        (spriv_dates, spriv_total), (spub_dates, spub_total)
+    ]) if spriv_dates and spub_dates else (spriv_dates or spub_dates, spriv_total or spub_total)
+    yoy_dates_1, yoy_values_1 = compute_yoy(total_dates, total_values) if total_dates else ([], [])
+    charts["chart1"] = {
+        "title": "Crecimiento del Crédito (SPriv+SPub)",
+        "spriv": {"dates": spriv_dates, "values": to_billions(spriv_total)},
+        "spub": {"dates": spub_dates, "values": to_billions(spub_total)},
+        "yoy": {"dates": yoy_dates_1, "values": yoy_values_1},
+    }
+
+    # Chart 2
+    hip_d, hip_v = get_series_from_sample(112)
+    pren_d, pren_v = get_series_from_sample(113)
+    pers_d, pers_v = get_series_from_sample(114)
+    tarj_d, tarj_v = get_series_from_sample(115)
+    series_2 = [(d, v) for d, v in [(hip_d, hip_v), (pren_d, pren_v), (pers_d, pers_v), (tarj_d, tarj_v)] if d]
+    total_dates_2, total_values_2 = align_and_sum(series_2) if series_2 else ([], [])
+    yoy_dates_2, yoy_values_2 = compute_yoy(total_dates_2, total_values_2) if total_dates_2 else ([], [])
+    charts["chart2"] = {
+        "title": "Crédito al Consumo",
+        "hipotecarios": {"dates": hip_d, "values": to_billions(hip_v)},
+        "prendarios": {"dates": pren_d, "values": to_billions(pren_v)},
+        "personales": {"dates": pers_d, "values": to_billions(pers_v)},
+        "tarjetas": {"dates": tarj_d, "values": to_billions(tarj_v)},
+        "yoy": {"dates": yoy_dates_2, "values": yoy_values_2},
+    }
+
+    # Chart 3
+    alt_d, alt_v = get_series_from_sample(117)
+    yoy_dates_3, yoy_values_3 = compute_yoy(alt_d, alt_v) if alt_d else ([], [])
+    charts["chart3"] = {
+        "title": "Préstamos al Sector Privado (Serie B)",
+        "total_me": {"dates": alt_d, "values": to_billions(alt_v)},
+        "yoy": {"dates": yoy_dates_3, "values": yoy_values_3},
+    }
+
+    # Chart 4 — not available in sample data
+    charts["chart4"] = {
+        "title": "Composición de Balances - Activo",
+        "dates": [], "efectivo": [], "titulos": [],
+        "spub": [], "spriv": [], "otros": [],
+    }
+
+    return charts
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +470,7 @@ def index():
 @app.route("/api/refresh")
 def api_refresh():
     """Fetch all data from BCRA and return processed chart data."""
+    source = "live"
     try:
         catalog = fetch_variable_catalog()
         discovered = discover_variables(catalog)
@@ -409,16 +489,36 @@ def api_refresh():
 
         return jsonify({
             "status": "ok",
+            "source": source,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "missing_variables": missing,
             "charts": charts,
         })
     except requests.exceptions.RequestException as e:
-        logger.error(f"BCRA API error: {e}")
-        return jsonify({"status": "error", "message": f"Error connecting to BCRA API: {str(e)}"}), 502
+        logger.warning(f"BCRA API unreachable: {e}. Falling back to sample data.")
+        return _fallback_sample_response()
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
+        # Try sample data as last resort
+        fallback = _fallback_sample_response()
+        if fallback:
+            return fallback
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+def _fallback_sample_response():
+    """Return chart data from sample_data.json."""
+    sample = load_sample_data()
+    if not sample:
+        return jsonify({"status": "error", "message": "API BCRA no disponible y no hay datos de ejemplo"}), 502
+    charts = build_chart_data_from_sample(sample)
+    return jsonify({
+        "status": "ok",
+        "source": "sample",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "missing_variables": [],
+        "charts": charts,
+    })
 
 
 @app.route("/api/variables")

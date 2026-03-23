@@ -112,6 +112,16 @@
             border-radius: 6px;
             font-size: 13px;
         }
+        .info-banner {
+            display: none;
+            background: #1c2a3a;
+            border: 1px solid #204a5a;
+            color: #80c0ff;
+            padding: 12px 24px;
+            margin: 8px 24px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
         @media (max-width: 900px) {
             .grid { grid-template-columns: 1fr; }
         }
@@ -129,6 +139,7 @@
 
 <div class="error-banner" id="errorBanner"></div>
 <div class="warning-banner" id="warningBanner"></div>
+<div class="info-banner" id="infoBanner"></div>
 
 <div class="grid">
     <div class="chart-container" id="chart1-container">
@@ -221,12 +232,14 @@ function refreshData() {
     const overlay = document.getElementById('loadingOverlay');
     const errorBanner = document.getElementById('errorBanner');
     const warningBanner = document.getElementById('warningBanner');
+    const infoBanner = document.getElementById('infoBanner');
 
     btn.disabled = true;
     btn.textContent = 'Cargando...';
     overlay.classList.add('active');
     errorBanner.style.display = 'none';
     warningBanner.style.display = 'none';
+    infoBanner.style.display = 'none';
 
     fetch('/api/refresh')
         .then(resp => {
@@ -240,6 +253,12 @@ function refreshData() {
 
             document.getElementById('lastUpdate').textContent =
                 'Última actualización: ' + data.timestamp;
+
+            if (data.source === 'sample') {
+                infoBanner.textContent =
+                    'Mostrando datos de ejemplo — API BCRA no disponible. Los datos son ilustrativos.';
+                infoBanner.style.display = 'block';
+            }
 
             if (data.missing_variables && data.missing_variables.length > 0) {
                 warningBanner.textContent =
@@ -306,7 +325,7 @@ function renderChart1(data) {
         ...DARK_LAYOUT,
         title: { text: data.title, font: { color: '#fff', size: 15 } },
         barmode: 'stack',
-        yaxis: makeYAxis('ARS $bn', 'left'),
+        yaxis: makeYAxis('ARS billones', 'left'),
         yaxis2: makeYAxis('% YoY', 'right', 'y'),
         xaxis: { ...DARK_LAYOUT.xaxis },
     };
@@ -355,7 +374,7 @@ function renderChart2(data) {
         ...DARK_LAYOUT,
         title: { text: data.title, font: { color: '#fff', size: 15 } },
         barmode: 'stack',
-        yaxis: makeYAxis('ARS $bn', 'left'),
+        yaxis: makeYAxis('ARS billones', 'left'),
         yaxis2: makeYAxis('% YoY', 'right', 'y'),
         xaxis: { ...DARK_LAYOUT.xaxis },
     };
@@ -394,7 +413,7 @@ function renderChart3(data) {
     const layout = {
         ...DARK_LAYOUT,
         title: { text: data.title, font: { color: '#fff', size: 15 } },
-        yaxis: makeYAxis('ARS $bn', 'left'),
+        yaxis: makeYAxis('ARS billones', 'left'),
         yaxis2: makeYAxis('% YoY', 'right', 'y'),
         xaxis: { ...DARK_LAYOUT.xaxis },
     };
