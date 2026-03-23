@@ -84,32 +84,57 @@ def fetch_series(id_variable, desde, hasta):
         resp = requests.get(url, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
+
+        logger.info(f"Raw response type: {type(data).__name__}, "
+                     f"keys={list(data.keys()) if isinstance(data, dict) else 'N/A'}, "
+                     f"len={len(data) if isinstance(data, (list, dict)) else 'N/A'}")
+
+        # Extract the results list from whichever wrapper the API uses
         if isinstance(data, list):
             results = data
+        elif isinstance(data, dict):
+            results = (data.get("results") or data.get("data") or
+                       data.get("variables") or data.get("detalle") or [])
+            if not results:
+                # Try the single key whatever it's called
+                for key, val in data.items():
+                    if isinstance(val, list):
+                        logger.info(f"Using dict key '{key}' as results (len={len(val)})")
+                        results = val
+                        break
         else:
-            results = data.get("results") or data.get("data") or data.get("variables") or []
-            if not results and offset == 0:
-                logger.info(f"Series response keys for id={id_variable}: {list(data.keys()) if isinstance(data, dict) else type(data)}")
-                if isinstance(data, dict) and len(data) == 1:
-                    # Try the single key whatever it's called
-                    results = list(data.values())[0] if isinstance(list(data.values())[0], list) else []
+            results = []
+
         if not results:
+            logger.info(f"No results found for id={id_variable}. Raw sample: {str(data)[:500]}")
             break
+
+        logger.info(f"Got {len(results)} results. First item type: {type(results[0]).__name__}, "
+                     f"keys={list(results[0].keys()) if isinstance(results[0], dict) else 'N/A'}")
+
         all_data.extend(results)
         if len(results) < limit:
             break
         offset += limit
 
-    # BCRA API returns nested structure: [{'idVariable': N, 'detalle': [{fecha, valor}, ...]}]
-    # Unwrap the 'detalle' array to get flat list of data points
+    # BCRA API may return nested structure: [{'idVariable': N, 'detalle': [{fecha, valor}, ...]}]
+    # or the dict response itself may have been unwrapped above.
+    # Flatten any nested 'detalle' arrays to get flat list of {fecha, valor} data points.
     unwrapped = []
     for item in all_data:
         if isinstance(item, dict) and "detalle" in item:
-            unwrapped.extend(item["detalle"])
+            detalle = item["detalle"]
+            if isinstance(detalle, list):
+                logger.info(f"Unwrapping detalle for idVariable={item.get('idVariable')}: {len(detalle)} points")
+                unwrapped.extend(detalle)
+            else:
+                unwrapped.append(item)
         else:
             unwrapped.append(item)
-    if unwrapped != all_data:
-        logger.info(f"Unwrapped detalle: {len(all_data)} items -> {len(unwrapped)} data points")
+
+    logger.info(f"fetch_series(id={id_variable}): {len(all_data)} raw -> {len(unwrapped)} unwrapped")
+    if unwrapped:
+        logger.info(f"First unwrapped item: {unwrapped[0]}")
     return unwrapped
 
 
@@ -551,6 +576,40 @@ def api_variables():
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/debug/<int:var_id>")
+def api_debug(var_id):
+    """Debug endpoint: fetch a single variable and show raw + processed data."""
+    desde = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    hasta = datetime.now().strftime("%Y-%m-%d")
+
+    # Step 1: Raw API response
+    url = f"{BCRA_MONETARIAS}/{var_id}?desde={desde}&hasta={hasta}&limit=10"
+    try:
+        resp = requests.get(url, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        raw = resp.json()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    # Step 2: Processed through fetch_series
+    processed = fetch_series(var_id, desde, hasta)
+
+    # Step 3: Parsed
+    parsed = parse_series(processed[:10] if processed else [])
+
+    return jsonify({
+        "variable_id": var_id,
+        "url": url,
+        "raw_response_type": type(raw).__name__,
+        "raw_response_keys": list(raw.keys()) if isinstance(raw, dict) else None,
+        "raw_response_sample": str(raw)[:2000],
+        "fetch_series_count": len(processed),
+        "fetch_series_sample": processed[:3] if processed else [],
+        "parsed_count": len(parsed),
+        "parsed_sample": parsed[:3] if parsed else [],
+    })
 
 
 @app.route("/api/clear-cache")
